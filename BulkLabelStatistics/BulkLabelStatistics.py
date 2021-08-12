@@ -4,7 +4,7 @@ import logging
 import vtk, qt, ctk, slicer
 from slicer.ScriptedLoadableModule import *
 from slicer.util import VTKObservationMixin
-
+import glob
 #
 # BulkLabelStatistics
 #
@@ -17,65 +17,16 @@ class BulkLabelStatistics(ScriptedLoadableModule):
   def __init__(self, parent):
     ScriptedLoadableModule.__init__(self, parent)
     self.parent.title = "BulkLabelStatistics"
-    self.parent.categories = ["Statistics"]
-    self.parent.dependencies = [LabelMapStatistics]
+    self.parent.categories = ["Quantification"]
+    self.parent.dependencies = ["LabelStatistics"]
     self.parent.contributors = ["Rafael Palomar (Oslo University Hospital)"]
     self.parent.helpText = """
-    This module can perform labelmap statistics in bulk
+    This module can perform labelmap statistics in bulk. It requires a pool of volumes and a pool of segmentation.
 """
     # TODO: replace with organization, grant and thanks
     self.parent.acknowledgementText = """
     This file was originally developed by Rafael Palomar (Oslo University Hospital) after Egidijus Pelanis (Oslo University Hospital) kindly requested it.
 """
-
-#
-# Register sample data sets in Sample Data module
-#
-
-def registerSampleData():
-  """
-  Add data sets to Sample Data module.
-  """
-  # It is always recommended to provide sample data for users to make it easy to try the module,
-  # but if no sample data is available then this method (and associated startupCompeted signal connection) can be removed.
-
-  import SampleData
-  iconsPath = os.path.join(os.path.dirname(__file__), 'Resources/Icons')
-
-  # To ensure that the source code repository remains small (can be downloaded and installed quickly)
-  # it is recommended to store data sets that are larger than a few MB in a Github release.
-
-  # BulkLabelStatistics1
-  SampleData.SampleDataLogic.registerCustomSampleDataSource(
-    # Category and sample name displayed in Sample Data module
-    category='BulkLabelStatistics',
-    sampleName='BulkLabelStatistics1',
-    # Thumbnail should have size of approximately 260x280 pixels and stored in Resources/Icons folder.
-    # It can be created by Screen Capture module, "Capture all views" option enabled, "Number of images" set to "Single".
-    thumbnailFileName=os.path.join(iconsPath, 'BulkLabelStatistics1.png'),
-    # Download URL and target file name
-    uris="https://github.com/Slicer/SlicerTestingData/releases/download/SHA256/998cb522173839c78657f4bc0ea907cea09fd04e44601f17c82ea27927937b95",
-    fileNames='BulkLabelStatistics1.nrrd',
-    # Checksum to ensure file integrity. Can be computed by this command:
-    #  import hashlib; print(hashlib.sha256(open(filename, "rb").read()).hexdigest())
-    checksums = 'SHA256:998cb522173839c78657f4bc0ea907cea09fd04e44601f17c82ea27927937b95',
-    # This node name will be used when the data set is loaded
-    nodeNames='BulkLabelStatistics1'
-  )
-
-  # BulkLabelStatistics2
-  SampleData.SampleDataLogic.registerCustomSampleDataSource(
-    # Category and sample name displayed in Sample Data module
-    category='BulkLabelStatistics',
-    sampleName='BulkLabelStatistics2',
-    thumbnailFileName=os.path.join(iconsPath, 'BulkLabelStatistics2.png'),
-    # Download URL and target file name
-    uris="https://github.com/Slicer/SlicerTestingData/releases/download/SHA256/1a64f3f422eb3d1c9b093d1a18da354b13bcf307907c66317e2463ee530b7a97",
-    fileNames='BulkLabelStatistics2.nrrd',
-    checksums = 'SHA256:1a64f3f422eb3d1c9b093d1a18da354b13bcf307907c66317e2463ee530b7a97',
-    # This node name will be used when the data set is loaded
-    nodeNames='BulkLabelStatistics2'
-  )
 
 #
 # BulkLabelStatisticsWidget
@@ -123,16 +74,13 @@ class BulkLabelStatisticsWidget(ScriptedLoadableModuleWidget, VTKObservationMixi
     self.addObserver(slicer.mrmlScene, slicer.mrmlScene.StartCloseEvent, self.onSceneStartClose)
     self.addObserver(slicer.mrmlScene, slicer.mrmlScene.EndCloseEvent, self.onSceneEndClose)
 
-    # These connections ensure that whenever user changes some settings on the GUI, that is saved in the MRML scene
-    # (in the selected parameter node).
-    self.ui.inputSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.updateParameterNodeFromGUI)
-    self.ui.outputSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.updateParameterNodeFromGUI)
-    self.ui.imageThresholdSliderWidget.connect("valueChanged(double)", self.updateParameterNodeFromGUI)
-    self.ui.invertOutputCheckBox.connect("toggled(bool)", self.updateParameterNodeFromGUI)
-    self.ui.invertedOutputSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.updateParameterNodeFromGUI)
+    self.ui.segmentationsDirLabel.enabled = False;
+    self.ui.outputFileLabel.enabled = False;
+    self.ui.computeStatisticsPushButton.enabled = False;
 
-    # Buttons
-    self.ui.applyButton.connect('clicked(bool)', self.onApplyButton)
+    self.ui.segmentationsDirPushButton.connect('clicked(bool)', self.onSegmentationDirButtonPushed)
+    self.ui.outputFilePushButton.connect('clicked(bool)', self.onOutputFileButtonPushed)
+    self.ui.computeStatisticsPushButton.connect('clicked(bool)', self.onComputeStatisticsPushButton)
 
     # Make sure parameter node is initialized (needed for module reload)
     self.initializeParameterNode()
@@ -181,12 +129,6 @@ class BulkLabelStatisticsWidget(ScriptedLoadableModuleWidget, VTKObservationMixi
 
     self.setParameterNode(self.logic.getParameterNode())
 
-    # Select default input nodes if nothing is selected yet to save a few clicks for the user
-    if not self._parameterNode.GetNodeReference("InputVolume"):
-      firstVolumeNode = slicer.mrmlScene.GetFirstNodeByClass("vtkMRMLScalarVolumeNode")
-      if firstVolumeNode:
-        self._parameterNode.SetNodeReferenceID("InputVolume", firstVolumeNode.GetID())
-
   def setParameterNode(self, inputParameterNode):
     """
     Set and observe parameter node.
@@ -220,21 +162,6 @@ class BulkLabelStatisticsWidget(ScriptedLoadableModuleWidget, VTKObservationMixi
     # Make sure GUI changes do not call updateParameterNodeFromGUI (it could cause infinite loop)
     self._updatingGUIFromParameterNode = True
 
-    # Update node selectors and sliders
-    self.ui.inputSelector.setCurrentNode(self._parameterNode.GetNodeReference("InputVolume"))
-    self.ui.outputSelector.setCurrentNode(self._parameterNode.GetNodeReference("OutputVolume"))
-    self.ui.invertedOutputSelector.setCurrentNode(self._parameterNode.GetNodeReference("OutputVolumeInverse"))
-    self.ui.imageThresholdSliderWidget.value = float(self._parameterNode.GetParameter("Threshold"))
-    self.ui.invertOutputCheckBox.checked = (self._parameterNode.GetParameter("Invert") == "true")
-
-    # Update buttons states and tooltips
-    if self._parameterNode.GetNodeReference("InputVolume") and self._parameterNode.GetNodeReference("OutputVolume"):
-      self.ui.applyButton.toolTip = "Compute output volume"
-      self.ui.applyButton.enabled = True
-    else:
-      self.ui.applyButton.toolTip = "Select input and output volume nodes"
-      self.ui.applyButton.enabled = False
-
     # All the GUI updates are done
     self._updatingGUIFromParameterNode = False
 
@@ -247,37 +174,62 @@ class BulkLabelStatisticsWidget(ScriptedLoadableModuleWidget, VTKObservationMixi
     if self._parameterNode is None or self._updatingGUIFromParameterNode:
       return
 
-    wasModified = self._parameterNode.StartModify()  # Modify all properties in a single batch
-
-    self._parameterNode.SetNodeReferenceID("InputVolume", self.ui.inputSelector.currentNodeID)
-    self._parameterNode.SetNodeReferenceID("OutputVolume", self.ui.outputSelector.currentNodeID)
-    self._parameterNode.SetParameter("Threshold", str(self.ui.imageThresholdSliderWidget.value))
-    self._parameterNode.SetParameter("Invert", "true" if self.ui.invertOutputCheckBox.checked else "false")
-    self._parameterNode.SetNodeReferenceID("OutputVolumeInverse", self.ui.invertedOutputSelector.currentNodeID)
-
     self._parameterNode.EndModify(wasModified)
 
-  def onApplyButton(self):
+  def onSegmentationDirButtonPushed(self):
+    """
+    Action when segmentation directory push button is clicked
+    """
+    directory = qt.QFileDialog.getExistingDirectory(None,"Choose the Segmentation directory")
+    if directory != '' :
+      self.ui.segmentationsDirLabel.setText(directory)
+      self.ui.segmentationsDirLabel.enabled = True
+    else:
+      self.ui.segmentationsDirLabel.setText('No segmentation directory specified')
+      self.ui.segmentationsDirLabel.enabled = False
+
+    self.enableComputeStatisticsPushButton()
+
+  def onOutputFileButtonPushed(self):
+    """
+    Action when output file push button is clicked
+    """
+    outputFile = qt.QFileDialog.getSaveFileName(None,"Save results as...")
+    if outputFile != '' :
+      self.ui.outputFileLabel.setText(outputFile)
+      self.ui.outputFileLabel.enabled = True
+    else:
+      self.ui.outputFileLabel.setText('No output file specified')
+      self.ui.outputFileLabel.enabled = False
+
+    self.enableComputeStatisticsPushButton()
+
+  def enableComputeStatisticsPushButton(self):
+    """
+    Check whether directories have been privided and enables/disables the compute statistics button
+    """
+    if self.ui.segmentationsDirLabel.enabled and self.ui.outputFileLabel.enabled:
+      self.ui.computeStatisticsPushButton.enabled = True
+    else:
+      self.ui.computeStatisticsPushButton.enabled = False
+
+  def onComputeStatisticsPushButton(self):
     """
     Run processing when user clicks "Apply" button.
     """
     try:
 
       # Compute output
-      self.logic.process(self.ui.inputSelector.currentNode(), self.ui.outputSelector.currentNode(),
-        self.ui.imageThresholdSliderWidget.value, self.ui.invertOutputCheckBox.checked)
-
-      # Compute inverted output (if needed)
-      if self.ui.invertedOutputSelector.currentNode():
-        # If additional output volume is selected then result with inverted threshold is written there
-        self.logic.process(self.ui.inputSelector.currentNode(), self.ui.invertedOutputSelector.currentNode(),
-          self.ui.imageThresholdSliderWidget.value, not self.ui.invertOutputCheckBox.checked, showResult=False)
+      # TODO: not very elegant getting a parameter from a text label, I know...
+      self.logic.process(self.ui.segmentationsDirLabel.text,
+                         self.ui.outputFileLabel.text,
+                         self.ui.statusLabel,
+                         self.ui.progressBar)
 
     except Exception as e:
       slicer.util.errorDisplay("Failed to compute results: "+str(e))
       import traceback
       traceback.print_exc()
-
 
 #
 # BulkLabelStatisticsLogic
@@ -303,42 +255,87 @@ class BulkLabelStatisticsLogic(ScriptedLoadableModuleLogic):
     """
     Initialize parameter node with default settings.
     """
-    if not parameterNode.GetParameter("Threshold"):
-      parameterNode.SetParameter("Threshold", "100.0")
-    if not parameterNode.GetParameter("Invert"):
-      parameterNode.SetParameter("Invert", "false")
+    pass
 
-  def process(self, inputVolume, outputVolume, imageThreshold, invert=False, showResult=True):
+  def process(self, segmentationsDir, outputFile, statusLabel, progressBar):
+
+    segmentations = glob.glob(segmentationsDir+ '/segmentation*')
+
+    print(segmentations)
+
+    from SegmentStatistics import SegmentStatisticsLogic
+
+    progressBar.setRange(0,len(segmentations))
+    progressBarValue = 0
+    progressBar.setValue(progressBarValue)
+    header = True
+
+    with open(outputFile, 'w') as f:
+
+      for segmentation in segmentations:
+
+        slicer.mrmlScene.Clear()
+
+        statusLabel.setText('Status: Loading ' + segmentation)
+        segmentationNode = slicer.util.loadSegmentation(segmentation)
+
+        statusLabel.setText('Stauts: Computing statistics for ' + segmentation)
+        logic = SegmentStatisticsLogic()
+        parameterNode = logic.getParameterNode();
+        parameterNode.SetParameter("Segmentation", segmentationNode.GetID())
+        newTable = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLTableNode")
+        # parameterNode.SetParameter("MeasurementsTable", newTable.GetID())
+        logic.getParameterNode().SetParameter("LabelmapSegmentStatisticsPlugin.voxel_count.enabled",str(True))
+        logic.getParameterNode().SetParameter("LabelmapSegmentStatisticsPlugin.volume_cm3.enabled",str(True))
+        logic.getParameterNode().SetParameter("LabelmapSegmentStatisticsPlugin.surface_area_mm2.enabled",str(True))
+        logic.computeStatistics()
+        logic.exportToTable(newTable)
+        logic.showTable(newTable)
+
+        statusLabel.setText('Stauts: Exporting statistics for ' + segmentation)
+        # Write the header for the first time
+        if header:
+          self.writeHeaderToCSV(newTable, f)
+          header = False
+
+        self.writeDataToCSV(segmentation, newTable, f)
+
+        progressBarValue+=1
+        progressBar.setValue(progressBarValue)
+
+    f.close()
+
+    statusLabel.setText('Status: Completed')
+    print("Completed!")
+
+  def writeHeaderToCSV(self, table, _file):
     """
-    Run the processing algorithm.
-    Can be used without GUI widget.
-    :param inputVolume: volume to be thresholded
-    :param outputVolume: thresholding result
-    :param imageThreshold: values above/below this threshold will be set to 0
-    :param invert: if True then values above the threshold will be set to 0, otherwise values below are set to 0
-    :param showResult: show output volume in slice viewers
+    Writes the CSV header to file
     """
+    _file.write('Dataset,')
+    for j in range(table.GetNumberOfColumns()):
+      if j < table.GetNumberOfColumns() -1:
+        _file.write(table.GetColumnName(j) + ',')
+      else:
+        _file.write(table.GetColumnName(j) + '\n')
 
-    if not inputVolume or not outputVolume:
-      raise ValueError("Input or output volume is invalid")
+  def writeDataToCSV(self, dataset, table, _file):
+    """
+    Writes the statistics in CSV format (wihtout header)
+    """
+    for i in range(table.GetNumberOfRows()):
+      for j in range(table.GetNumberOfColumns()+1):
+        if j == 0:
+          _file.write(dataset + ',')
+        elif j>0 and j < table.GetNumberOfColumns():
+          _file.write(table.GetCellText(i,j-1) + ',')
+        else:
+          _file.write(table.GetCellText(i,j-1) + '\n')
 
-    import time
-    startTime = time.time()
-    logging.info('Processing started')
 
-    # Compute the thresholded output volume using the "Threshold Scalar Volume" CLI module
-    cliParams = {
-      'InputVolume': inputVolume.GetID(),
-      'OutputVolume': outputVolume.GetID(),
-      'ThresholdValue' : imageThreshold,
-      'ThresholdType' : 'Above' if invert else 'Below'
-      }
-    cliNode = slicer.cli.run(slicer.modules.thresholdscalarvolume, None, cliParams, wait_for_completion=True, update_display=showResult)
-    # We don't need the CLI module node anymore, remove it to not clutter the scene with it
-    slicer.mrmlScene.RemoveNode(cliNode)
 
-    stopTime = time.time()
-    logging.info(f'Processing completed in {stopTime-startTime:.2f} seconds')
+
+
 
 #
 # BulkLabelStatisticsTest
@@ -394,16 +391,3 @@ class BulkLabelStatisticsTest(ScriptedLoadableModuleTest):
 
     logic = BulkLabelStatisticsLogic()
 
-    # Test algorithm with non-inverted threshold
-    logic.process(inputVolume, outputVolume, threshold, True)
-    outputScalarRange = outputVolume.GetImageData().GetScalarRange()
-    self.assertEqual(outputScalarRange[0], inputScalarRange[0])
-    self.assertEqual(outputScalarRange[1], threshold)
-
-    # Test algorithm with inverted threshold
-    logic.process(inputVolume, outputVolume, threshold, False)
-    outputScalarRange = outputVolume.GetImageData().GetScalarRange()
-    self.assertEqual(outputScalarRange[0], inputScalarRange[0])
-    self.assertEqual(outputScalarRange[1], inputScalarRange[1])
-
-    self.delayDisplay('Test passed')
