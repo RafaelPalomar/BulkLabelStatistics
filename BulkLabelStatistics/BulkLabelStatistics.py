@@ -288,6 +288,7 @@ class BulkLabelStatisticsLogic(ScriptedLoadableModuleLogic):
         logic.getParameterNode().SetParameter("LabelmapSegmentStatisticsPlugin.voxel_count.enabled",str(True))
         logic.getParameterNode().SetParameter("LabelmapSegmentStatisticsPlugin.volume_cm3.enabled",str(True))
         logic.getParameterNode().SetParameter("LabelmapSegmentStatisticsPlugin.surface_area_mm2.enabled",str(True))
+        logic.getParameterNode().SetParameter("ScalarVolumeSegmentStatisticsPlugin.median.enabled",str(True))
         logic.computeStatistics()
         logic.exportToTable(newTable)
         logic.showTable(newTable)
