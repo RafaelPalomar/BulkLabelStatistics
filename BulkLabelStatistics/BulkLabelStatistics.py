@@ -18,7 +18,7 @@ class BulkLabelStatistics(ScriptedLoadableModule):
     ScriptedLoadableModule.__init__(self, parent)
     self.parent.title = "BulkLabelStatistics"
     self.parent.categories = ["Quantification"]
-    self.parent.dependencies = ["LabelStatistics"]
+    self.parent.dependencies = ["SegmentStatistics"]
     self.parent.contributors = ["Rafael Palomar (Oslo University Hospital)"]
     self.parent.helpText = """
     This module can perform labelmap statistics in bulk. It requires a pool of volumes and a pool of segmentation.
