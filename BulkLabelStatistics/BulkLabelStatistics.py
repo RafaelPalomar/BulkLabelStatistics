@@ -5,6 +5,7 @@ import vtk, qt, ctk, slicer
 from slicer.ScriptedLoadableModule import *
 from slicer.util import VTKObservationMixin
 import glob
+import itertools
 #
 # BulkLabelStatistics
 #
@@ -79,6 +80,7 @@ class BulkLabelStatisticsWidget(ScriptedLoadableModuleWidget, VTKObservationMixi
     self.ui.computeStatisticsPushButton.enabled = False;
 
     self.ui.segmentationsDirPushButton.connect('clicked(bool)', self.onSegmentationDirButtonPushed)
+    self.ui.volumesDirPushButton.connect('clicked(bool)', self.onVolumeDirButtonPushed)
     self.ui.outputFilePushButton.connect('clicked(bool)', self.onOutputFileButtonPushed)
     self.ui.computeStatisticsPushButton.connect('clicked(bool)', self.onComputeStatisticsPushButton)
 
@@ -190,6 +192,20 @@ class BulkLabelStatisticsWidget(ScriptedLoadableModuleWidget, VTKObservationMixi
 
     self.enableComputeStatisticsPushButton()
 
+  def onVolumeDirButtonPushed(self):
+    """
+    Action when volume directory push button is clicked
+    """
+    directory = qt.QFileDialog.getExistingDirectory(None,"Choose the Volume directory")
+    if directory != '' :
+      self.ui.volumesDirLabel.setText(directory)
+      self.ui.volumesDirLabel.enabled = True
+    else:
+      self.ui.volumesDirLabel.setText('No volume directory specified')
+      self.ui.volumesDirLabel.enabled = False
+
+    self.enableComputeStatisticsPushButton()
+
   def onOutputFileButtonPushed(self):
     """
     Action when output file push button is clicked
@@ -222,6 +238,7 @@ class BulkLabelStatisticsWidget(ScriptedLoadableModuleWidget, VTKObservationMixi
       # Compute output
       # TODO: not very elegant getting a parameter from a text label, I know...
       self.logic.process(self.ui.segmentationsDirLabel.text,
+                         self.ui.volumesDirLabel.text,
                          self.ui.outputFileLabel.text,
                          self.ui.statusLabel,
                          self.ui.progressBar)
@@ -257,11 +274,13 @@ class BulkLabelStatisticsLogic(ScriptedLoadableModuleLogic):
     """
     pass
 
-  def process(self, segmentationsDir, outputFile, statusLabel, progressBar):
+  def process(self, segmentationsDir, volumesDir, outputFile, statusLabel, progressBar):
 
     segmentations = glob.glob(segmentationsDir+ '/segmentation*')
+    volumes = glob.glob(volumesDir+ '/volume*')
 
     print(segmentations)
+    print(volumes)
 
     from SegmentStatistics import SegmentStatisticsLogic
 
@@ -272,17 +291,19 @@ class BulkLabelStatisticsLogic(ScriptedLoadableModuleLogic):
 
     with open(outputFile, 'w') as f:
 
-      for segmentation in segmentations:
+      for [segmentation, scalarVolume] in zip(segmentations, volumes):
 
         slicer.mrmlScene.Clear()
 
         statusLabel.setText('Status: Loading ' + segmentation)
         segmentationNode = slicer.util.loadSegmentation(segmentation)
+        scalarVolumeNode = slicer.util.loadVolume(scalarVolume)
 
         statusLabel.setText('Stauts: Computing statistics for ' + segmentation)
         logic = SegmentStatisticsLogic()
         parameterNode = logic.getParameterNode();
         parameterNode.SetParameter("Segmentation", segmentationNode.GetID())
+        parameterNode.SetParameter("ScalarVolume", scalarVolumeNode.GetID())
         newTable = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLTableNode")
         # parameterNode.SetParameter("MeasurementsTable", newTable.GetID())
         logic.getParameterNode().SetParameter("LabelmapSegmentStatisticsPlugin.voxel_count.enabled",str(True))
